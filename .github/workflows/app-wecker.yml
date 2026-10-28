@@ -1,0 +1,37 @@
+# App-Wecker (liegt im öffentlichen Pages-Repo unter .github/workflows/, publish.sh kopiert ihn dorthin).
+# Speichert Leonard in der App etwas (die App schreibt state.enc.json), startet diese Action die Cloud-Routine
+# „Freigaben & Antworten“ sofort über ihren API-Auslöser – statt bis zu 2 Stunden auf den nächsten geplanten Lauf zu warten.
+# Kein Passwort, keine Daten: die Routine liest selbst, was offen ist. Mehrere Klicks kurz hintereinander → ein Lauf (2 Min. Ruhe).
+#
+# Einmalig: Repo klatscher25/bt-a0ed0190 → Settings → Secrets and variables → Actions → zwei Secrets anlegen:
+#   ROUTINE_FREIGABEN_URL    Fire-URL der Routine (claude.ai/code/routines → „Freigaben & Antworten“ → Bearbeiten → Trigger „+“ → API)
+#   ROUTINE_FREIGABEN_TOKEN  der dort einmal angezeigte Token
+# Fehlen sie, meldet die Action das nur; die geplanten Läufe bleiben die Absicherung.
+name: App-Wecker
+on:
+  push:
+    branches: [main]
+    paths: [state.enc.json]
+  workflow_dispatch:
+concurrency: { group: app-wecker, cancel-in-progress: true }
+permissions: {}
+jobs:
+  wecken:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Kurz warten (weitere Änderungen sammeln)
+        run: sleep 120
+      - name: Routine wecken
+        env:
+          URL: ${{ secrets.ROUTINE_FREIGABEN_URL }}
+          TOKEN: ${{ secrets.ROUTINE_FREIGABEN_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$TOKEN" ]; then echo "::notice::Secrets ROUTINE_FREIGABEN_URL/-TOKEN fehlen – kein Wecken"; exit 0; fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL" \
+            -H "Authorization: Bearer $TOKEN" -H "anthropic-beta: experimental-cc-routine-2026-04-01" \
+            -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+            -d "{\"text\": \"App geändert (Stand ${SHA:0:7}). Bitte read_state.py --pending abarbeiten.\"}")
+          echo "Routine geweckt: HTTP $code"
+          [ "$code" -lt 300 ]
